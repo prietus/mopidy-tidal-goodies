@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mopidy-tidal-goodies"
+version = "0.1.0"
+description = "HTTP endpoints for things mopidy-tidal doesn't expose: favorites, mutable playlists, mixes."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Carlos Prieto", email = "cprieto.ortiz@gmail.com" }]
+classifiers = [
+  "Environment :: No Input/Output (Daemon)",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+dependencies = [
+  "mopidy >= 4.0.0a2",
+  "mopidy-tidal",
+  "tornado >= 6.0",
+]
+
+[project.optional-dependencies]
+test = ["pytest", "pytest-mock"]
+
+[project.entry-points."mopidy.ext"]
+tidal_goodies = "mopidy_tidal_goodies:Extension"
+
+[project.urls]
+Homepage = "https://github.com/prietus/mopidy-tidal-goodies"
+Issues = "https://github.com/prietus/mopidy-tidal-goodies/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["mopidy_tidal_goodies*"]
+
+[tool.setuptools.package-data]
+mopidy_tidal_goodies = ["ext.conf"]
