@@ -38,13 +38,26 @@ CREATE TABLE IF NOT EXISTS plays (
   track_name    TEXT NOT NULL DEFAULT '',
   artist        TEXT NOT NULL DEFAULT '',
   album         TEXT NOT NULL DEFAULT '',
+  album_uri     TEXT,                       -- for cover lookup; nullable
+  genre         TEXT,                       -- nullable; missing for old rows
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   played_ms     INTEGER NOT NULL DEFAULT 0,
   completed     INTEGER NOT NULL DEFAULT 0  -- 1 if played >= 50% (scrobble-ish)
 );
 CREATE INDEX IF NOT EXISTS idx_plays_played_at ON plays(played_at DESC);
 CREATE INDEX IF NOT EXISTS idx_plays_track_uri ON plays(track_uri);
+CREATE INDEX IF NOT EXISTS idx_plays_artist ON plays(artist);
+CREATE INDEX IF NOT EXISTS idx_plays_genre ON plays(genre);
 """
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Idempotent schema upgrades for DBs from earlier versions."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(plays)")}
+    if "album_uri" not in cols:
+        conn.execute("ALTER TABLE plays ADD COLUMN album_uri TEXT")
+    if "genre" not in cols:
+        conn.execute("ALTER TABLE plays ADD COLUMN genre TEXT")
 
 
 def open_db(path: pathlib.Path) -> sqlite3.Connection:
@@ -52,6 +65,7 @@ def open_db(path: pathlib.Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
 
 
@@ -83,6 +97,8 @@ class PlaybackHistoryFrontend(pykka.ThreadingActor, CoreListener):
         track = tl_track.track
         artist = ", ".join(a.name for a in (track.artists or []) if a.name)
         album = track.album.name if track.album and track.album.name else ""
+        album_uri = track.album.uri if track.album and track.album.uri else None
+        genre = track.genre or None
         duration_ms = int(track.length or 0)
         played_ms = int(time_position or 0)
         # Scrobble-like rule: ≥50% of length OR ≥4 minutes counts as completed.
@@ -93,14 +109,16 @@ class PlaybackHistoryFrontend(pykka.ThreadingActor, CoreListener):
         try:
             self.conn.execute(
                 "INSERT INTO plays (played_at, track_uri, track_name, artist,"
-                " album, duration_ms, played_ms, completed)"
-                " VALUES (?,?,?,?,?,?,?,?)",
+                " album, album_uri, genre, duration_ms, played_ms, completed)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     int(time.time()),
                     track.uri,
                     track.name or "",
                     artist,
                     album,
+                    album_uri,
+                    genre,
                     duration_ms,
                     played_ms,
                     completed,
