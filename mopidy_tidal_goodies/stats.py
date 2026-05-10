@@ -30,7 +30,7 @@ def db_path_from_config(config) -> pathlib.Path:
     return base / "history.db"
 
 
-SCHEMA = """
+CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS plays (
   id            INTEGER PRIMARY KEY,
   played_at     INTEGER NOT NULL,           -- unix seconds
@@ -43,12 +43,15 @@ CREATE TABLE IF NOT EXISTS plays (
   duration_ms   INTEGER NOT NULL DEFAULT 0,
   played_ms     INTEGER NOT NULL DEFAULT 0,
   completed     INTEGER NOT NULL DEFAULT 0  -- 1 if played >= 50% (scrobble-ish)
-);
-CREATE INDEX IF NOT EXISTS idx_plays_played_at ON plays(played_at DESC);
-CREATE INDEX IF NOT EXISTS idx_plays_track_uri ON plays(track_uri);
-CREATE INDEX IF NOT EXISTS idx_plays_artist ON plays(artist);
-CREATE INDEX IF NOT EXISTS idx_plays_genre ON plays(genre);
+)
 """
+
+INDICES = (
+    "CREATE INDEX IF NOT EXISTS idx_plays_played_at ON plays(played_at DESC)",
+    "CREATE INDEX IF NOT EXISTS idx_plays_track_uri ON plays(track_uri)",
+    "CREATE INDEX IF NOT EXISTS idx_plays_artist ON plays(artist)",
+    "CREATE INDEX IF NOT EXISTS idx_plays_genre ON plays(genre)",
+)
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
@@ -64,8 +67,13 @@ def open_db(path: pathlib.Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path), isolation_level=None, check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.executescript(SCHEMA)
+    # Order matters: CREATE TABLE first (no-op when it exists), then migrate
+    # any pre-v0.3 DB to add new columns, finally create indices that may
+    # reference those new columns.
+    conn.execute(CREATE_TABLE)
     _migrate(conn)
+    for stmt in INDICES:
+        conn.execute(stmt)
     return conn
 
 
