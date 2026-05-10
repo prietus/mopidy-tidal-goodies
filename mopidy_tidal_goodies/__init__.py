@@ -3,7 +3,7 @@ import pathlib
 
 from mopidy import config, ext
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +22,10 @@ class Extension(ext.Extension):
 
     def setup(self, registry):
         from .handlers import factory
+        from .stats import PlaybackHistoryFrontend
 
         registry.add(
             "http:app",
             {"name": self.ext_name, "factory": factory},
         )
+        registry.add("frontend", PlaybackHistoryFrontend)
