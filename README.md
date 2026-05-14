@@ -48,18 +48,19 @@ features to show in your client.
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.4.0",
   "features": {
     "favorites": true,
     "favorites_active": true,
-    "stats": true
+    "stats": true,
+    "audio": true
   }
 }
 ```
 
 `favorites_active` is `false` when `mopidy-tidal` isn't loaded or isn't
 logged in — favorites endpoints will return `503` in that case. `stats`
-works for any backend (independent of Tidal).
+and `audio` work for any backend (independent of Tidal).
 
 ### Favorites
 
@@ -106,14 +107,42 @@ Genre and album cover URI are captured from Mopidy's Track model. Plays
 recorded by an older version of this plugin will have NULL there — those rows
 contribute to totals/top-artists/top-albums but not to top-genres or covers.
 
+### Audio output
+
+```
+GET /tidal_goodies/audio/output
+```
+
+Returns the configured GStreamer sink and, when it's `alsasink`, resolves
+the human-readable card name from `/proc/asound/cards`:
+
+```json
+{
+  "sink": "alsasink",
+  "device": "hw:1,0",
+  "card": {
+    "index": 1,
+    "id": "D90III",
+    "name": "Topping D90 III SABRE"
+  }
+}
+```
+
+For non-ALSA sinks (`pulsesink`, `pipewiresink`, `autoaudiosink`, …) or
+when the card can't be identified (`device=default`, unknown index, non-
+Linux host), `card` is `null` and clients should fall back to the raw
+`device` string. Returns `null` (200 with body `null`) when no `audio.output`
+is configured.
+
 ## Roadmap
 
 - **v0.1** — favorites.
 - **v0.2** — listening history (recent / most-played / totals).
-- **v0.3** — aggregated stats (top artists/albums/genres, day-of-week, hour-of-day). *(current)*
-- **v0.4** — mutable Tidal playlists (create / add / remove / reorder).
-- **v0.5** — discovery: Your Mixes, mood radios.
-- **v0.6** — admin: force session refresh, cache stats.
+- **v0.3** — aggregated stats (top artists/albums/genres, day-of-week, hour-of-day).
+- **v0.4** — audio output device info. *(current)*
+- **v0.5** — mutable Tidal playlists (create / add / remove / reorder).
+- **v0.6** — discovery: Your Mixes, mood radios.
+- **v0.7** — admin: force session refresh, cache stats.
 
 ## License
 

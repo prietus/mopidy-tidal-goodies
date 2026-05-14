@@ -20,6 +20,10 @@ ext_name as prefix). Two feature groups:
       GET    /tidal_goodies/stats/by-hour
       GET    /tidal_goodies/stats/totals
 
+  Audio:
+
+      GET    /tidal_goodies/audio/output
+
   Discovery:
 
       GET    /tidal_goodies/_health
@@ -30,7 +34,7 @@ import sqlite3
 
 from tornado.web import HTTPError, RequestHandler
 
-from . import __version__
+from . import __version__, audio
 from .stats import db_path_from_config
 from .tidal import TidalUnavailable, get_session
 
@@ -63,6 +67,7 @@ def factory(config, core):
         (r"/stats/by-day-of-week", StatsByDayOfWeekHandler, common),
         (r"/stats/by-hour", StatsByHourHandler, common),
         (r"/stats/totals", StatsTotalsHandler, common),
+        (r"/audio/output", AudioOutputHandler, common),
     ]
 
 
@@ -105,6 +110,7 @@ class HealthHandler(_Base):
                 "favorites": True,
                 "favorites_active": tidal_active,
                 "stats": True,
+                "audio": True,
             },
         }))
 
@@ -408,6 +414,18 @@ class StatsByHourHandler(_Base):
         ]
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps(items))
+
+
+# ── audio ──────────────────────────────────────────────────────────────
+
+
+class AudioOutputHandler(_Base):
+    """Configured audio sink + (for ALSA) the human-readable card name."""
+
+    def get(self):
+        info = audio.describe(self.config.get("audio") if self.config else None)
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps(info))
 
 
 def _safe_int(s, default, lo=None, hi=None):
