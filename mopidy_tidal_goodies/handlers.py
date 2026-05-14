@@ -23,6 +23,7 @@ ext_name as prefix). Two feature groups:
   Audio:
 
       GET    /tidal_goodies/audio/output
+      GET    /tidal_goodies/audio/active
 
   Discovery:
 
@@ -68,6 +69,7 @@ def factory(config, core):
         (r"/stats/by-hour", StatsByHourHandler, common),
         (r"/stats/totals", StatsTotalsHandler, common),
         (r"/audio/output", AudioOutputHandler, common),
+        (r"/audio/active", AudioActiveHandler, common),
     ]
 
 
@@ -424,6 +426,21 @@ class AudioOutputHandler(_Base):
 
     def get(self):
         info = audio.describe(self.config.get("audio") if self.config else None)
+        self.set_header("Content-Type", "application/json")
+        self.write(json.dumps(info))
+
+
+class AudioActiveHandler(_Base):
+    """Runtime ALSA params + static chain analysis (bit-perfect or not).
+
+    Combines ``/audio/output`` (config + card lookup) with the live PCM
+    params from ``/proc/asound`` so a client can render a single
+    "what's the DAC seeing right now" panel.
+    """
+
+    def get(self):
+        cfg = self.config.get("audio") if self.config else None
+        info = audio.runtime(cfg)
         self.set_header("Content-Type", "application/json")
         self.write(json.dumps(info))
 

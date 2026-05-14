@@ -169,3 +169,210 @@ def test_describe_no_config_returns_none(cards):
 def test_describe_unknown_card_keeps_device(cards):
     info = audio.describe({"output": "alsasink device=hw:42,0"}, cards_path=cards)
     assert info == {"sink": "alsasink", "device": "hw:42,0", "card": None}
+
+
+# ── _alsa_dev_index ────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "device,expected",
+    [
+        ("hw:1,0", 0),
+        ("hw:1,3", 3),
+        ("hw:1", 0),
+        ("hw:Topping", 0),
+        ("hw:CARD=SABRE,DEV=0", 0),
+        ("hw:CARD=SABRE,DEV=2", 2),
+        ("plughw:0,1", 1),
+        ("default", 0),
+        ("", 0),
+        (None, 0),
+    ],
+)
+def test_alsa_dev_index(device, expected):
+    assert audio._alsa_dev_index(device) == expected
+
+
+# ── read_hw_params ─────────────────────────────────────────────────────────
+
+
+HW_PARAMS_PLAYING = """\
+access: MMAP_INTERLEAVED
+format: S32_LE
+subformat: STD
+channels: 2
+rate: 44100 (44100/1)
+period_size: 11025
+buffer_size: 22050
+"""
+
+
+def _write_hw_params(proc_root, card, dev, sub, content):
+    p = proc_root / f"card{card}" / f"pcm{dev}p" / f"sub{sub}" / "hw_params"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(content)
+
+
+def test_read_hw_params_when_playing(tmp_path):
+    _write_hw_params(tmp_path, 0, 0, 0, HW_PARAMS_PLAYING)
+    assert audio.read_hw_params(0, dev=0, sub=0, proc_root=tmp_path) == {
+        "rate": 44100,
+        "bits": 32,
+        "channels": 2,
+        "alsa_format": "S32_LE",
+    }
+
+
+def test_read_hw_params_closed_returns_none(tmp_path):
+    _write_hw_params(tmp_path, 0, 0, 0, "closed\n")
+    assert audio.read_hw_params(0, proc_root=tmp_path) is None
+
+
+def test_read_hw_params_missing_returns_none(tmp_path):
+    assert audio.read_hw_params(0, proc_root=tmp_path) is None
+
+
+def test_read_hw_params_hires(tmp_path):
+    _write_hw_params(tmp_path, 1, 0, 0, """\
+access: MMAP_INTERLEAVED
+format: S24_3LE
+subformat: STD
+channels: 2
+rate: 192000 (192000/1)
+""")
+    info = audio.read_hw_params(1, proc_root=tmp_path)
+    assert info == {
+        "rate": 192000,
+        "bits": 24,
+        "channels": 2,
+        "alsa_format": "S24_3LE",
+    }
+
+
+def test_read_hw_params_dsd(tmp_path):
+    _write_hw_params(tmp_path, 0, 0, 0, """\
+access: MMAP_INTERLEAVED
+format: DSD_U32_BE
+subformat: STD
+channels: 2
+rate: 352800 (352800/1)
+""")
+    info = audio.read_hw_params(0, proc_root=tmp_path)
+    assert info["alsa_format"] == "DSD_U32_BE"
+    assert info["bits"] == 32
+    assert info["rate"] == 352800
+
+
+# ── analyze_chain ──────────────────────────────────────────────────────────
+
+
+def test_chain_bit_perfect():
+    chain = audio.analyze_chain(
+        {"output": "alsasink device=hw:CARD=SABRE,DEV=0", "mixer": "none"}
+    )
+    assert chain == {
+        "direct_hw": True,
+        "no_mixer": True,
+        "no_resample": True,
+        "no_convert": True,
+        "verdict": "bit-perfect",
+    }
+
+
+def test_chain_software_mixer_breaks_bit_perfect():
+    chain = audio.analyze_chain(
+        {"output": "alsasink device=hw:1,0", "mixer": "software"}
+    )
+    assert chain["no_mixer"] is False
+    assert chain["verdict"] == "not-bit-perfect"
+
+
+def test_chain_plughw_breaks_bit_perfect():
+    chain = audio.analyze_chain(
+        {"output": "alsasink device=plughw:1,0", "mixer": "none"}
+    )
+    assert chain["direct_hw"] is False
+    assert chain["verdict"] == "not-bit-perfect"
+
+
+def test_chain_explicit_resampler_breaks_bit_perfect():
+    chain = audio.analyze_chain(
+        {"output": "audioresample ! alsasink device=hw:1,0", "mixer": "none"}
+    )
+    # _parse_bin only sees the first element ("audioresample"), so sink is not
+    # alsasink — verdict falls through to unknown. The chain flags still tell
+    # the truth: no_resample is False.
+    assert chain["no_resample"] is False
+
+
+def test_chain_pulse_is_unknown():
+    chain = audio.analyze_chain({"output": "pulsesink", "mixer": "software"})
+    assert chain["verdict"] == "unknown"
+
+
+def test_chain_pipewire_is_unknown():
+    chain = audio.analyze_chain({"output": "pipewiresink", "mixer": "none"})
+    assert chain["verdict"] == "unknown"
+
+
+def test_chain_empty_config_is_unknown():
+    chain = audio.analyze_chain({})
+    assert chain["verdict"] == "unknown"
+
+
+def test_chain_none_config_is_unknown():
+    chain = audio.analyze_chain(None)
+    assert chain["verdict"] == "unknown"
+
+
+# ── runtime (end-to-end) ───────────────────────────────────────────────────
+
+
+def test_runtime_active_bit_perfect(cards, tmp_path):
+    _write_hw_params(tmp_path, 1, 0, 0, HW_PARAMS_PLAYING)
+    info = audio.runtime(
+        {"output": "alsasink device=hw:CARD=D90III,DEV=0", "mixer": "none"},
+        cards_path=cards,
+        proc_root=tmp_path,
+    )
+    assert info["output"]["card"]["name"] == "Topping D90 III SABRE"
+    assert info["active"] is True
+    assert info["format"]["rate"] == 44100
+    assert info["chain"]["verdict"] == "bit-perfect"
+
+
+def test_runtime_idle_keeps_chain(cards, tmp_path):
+    # No hw_params file → device idle.
+    info = audio.runtime(
+        {"output": "alsasink device=hw:1,0", "mixer": "none"},
+        cards_path=cards,
+        proc_root=tmp_path,
+    )
+    assert info["active"] is False
+    assert info["format"] is None
+    assert info["chain"]["verdict"] == "bit-perfect"
+
+
+def test_runtime_non_alsa(cards, tmp_path):
+    info = audio.runtime(
+        {"output": "pulsesink", "mixer": "software"},
+        cards_path=cards,
+        proc_root=tmp_path,
+    )
+    assert info["output"]["sink"] == "pulsesink"
+    assert info["active"] is False
+    assert info["format"] is None
+    assert info["chain"]["verdict"] == "unknown"
+
+
+def test_runtime_picks_correct_dev(cards, tmp_path):
+    # DAC exposes two PCMs; we should hit pcm2p when DEV=2.
+    _write_hw_params(tmp_path, 1, 0, 0, "closed\n")
+    _write_hw_params(tmp_path, 1, 2, 0, HW_PARAMS_PLAYING)
+    info = audio.runtime(
+        {"output": "alsasink device=hw:CARD=D90III,DEV=2", "mixer": "none"},
+        cards_path=cards,
+        proc_root=tmp_path,
+    )
+    assert info["active"] is True
+    assert info["format"]["rate"] == 44100

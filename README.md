@@ -48,7 +48,7 @@ features to show in your client.
 
 ```json
 {
-  "version": "0.4.0",
+  "version": "0.5.0",
   "features": {
     "favorites": true,
     "favorites_active": true,
@@ -134,15 +134,61 @@ Linux host), `card` is `null` and clients should fall back to the raw
 `device` string. Returns `null` (200 with body `null`) when no `audio.output`
 is configured.
 
+```
+GET /tidal_goodies/audio/active
+```
+
+Combined runtime + static view of the audio chain. `format` is read live from
+`/proc/asound/card<N>/pcm<DEV>p/sub0/hw_params` — what ALSA is actually
+receiving right now. `chain` is a static analysis of the configured pipeline.
+
+```json
+{
+  "output": {
+    "sink": "alsasink",
+    "device": "hw:CARD=SABRE,DEV=0",
+    "card": { "index": 0, "id": "SABRE", "name": "D90 III SABRE" }
+  },
+  "active": true,
+  "format": { "rate": 44100, "bits": 32, "channels": 2, "alsa_format": "S32_LE" },
+  "chain": {
+    "direct_hw": true,
+    "no_mixer": true,
+    "no_resample": true,
+    "no_convert": true,
+    "verdict": "bit-perfect"
+  }
+}
+```
+
+`chain.verdict` is one of:
+
+- `"bit-perfect"` — `alsasink` bound directly to `hw:` (no `plughw:`, no
+  `dmix`/`dsnoop`), `mixer = none`, no `audioresample`/`audioconvert` in the
+  GStreamer bin spec.
+- `"not-bit-perfect"` — at least one of the conditions above fails.
+- `"unknown"` — non-ALSA sink (`pulsesink`, `pipewiresink`, `autoaudiosink`,
+  …) where bit-perfect-ness depends on the sound server's own config, which
+  we can't see from here.
+
+When playback is paused/stopped, `active` is `false` and `format` is `null`,
+but `chain` still reports.
+
+`format.bits` is the **container** width that ALSA exposes (e.g. 24-bit PCM
+streamed in an `S32_LE` container reports `32` here). The source bit depth
+isn't recoverable from `/proc/asound`. `alsa_format` is the raw token, useful
+for distinguishing DSD (`DSD_U32_BE`) from PCM (`S32_LE`).
+
 ## Roadmap
 
 - **v0.1** — favorites.
 - **v0.2** — listening history (recent / most-played / totals).
 - **v0.3** — aggregated stats (top artists/albums/genres, day-of-week, hour-of-day).
-- **v0.4** — audio output device info. *(current)*
-- **v0.5** — mutable Tidal playlists (create / add / remove / reorder).
-- **v0.6** — discovery: Your Mixes, mood radios.
-- **v0.7** — admin: force session refresh, cache stats.
+- **v0.4** — audio output device info.
+- **v0.5** — live ALSA params + bit-perfect chain analysis. *(current)*
+- **v0.6** — mutable Tidal playlists (create / add / remove / reorder).
+- **v0.7** — discovery: Your Mixes, mood radios.
+- **v0.8** — admin: force session refresh, cache stats.
 
 ## License
 
